@@ -26,6 +26,8 @@ docker compose up -d --build
 4. `GET /api/matches`：查看匹配组与手续费分摊。
 5. `GET /api/differences`：查看两侧守恒与差异归因。
 6. `GET /api/export/report.csv` 与 `GET /api/export/manifest.json`：导出。
+7. `POST /api/closes`：上传期末余额表（或 `sample=bank_balance_dirty.csv`）生成关账版本；
+   `GET /api/closes/latest/close.csv` 与 `/close.json` 导出该版结果。
 
 ## 单步重跑
 
@@ -49,8 +51,10 @@ curl -s -X POST http://127.0.0.1:18206/api/statements/import \
 
 - 400：参数或文件不可用，页面顶部提示原因，保留已填内容。
 - 404：批次或样例不存在，先执行 `POST /api/demo/run`。
-- 409：还没有候选就求解匹配，先执行 `POST /api/candidates`。
+- 409：还没有候选就求解匹配，先执行 `POST /api/candidates`；没有完成双侧匹配的批次不能关账。
 - 隔离行不是失败：按原因码修正源文件后重新导入。
+- 关账 400：期末余额表账户未登记、重复或金额无法解析，修正余额表后重新上传；不会留下半成品版本。
+- 关账重跑：同一批次与同一余额表命中同一 `close_id`，先删后插；落库中途失败整体回滚，已发布的旧版本完整可读。余额表金额变化才会生成新版本，旧版在页面 `/close?version=...` 与 `GET /api/closes/{close_id}` 永久可查。
 
 ## 日志
 

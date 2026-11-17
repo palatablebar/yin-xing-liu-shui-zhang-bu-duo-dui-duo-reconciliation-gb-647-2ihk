@@ -85,6 +85,36 @@ CREATE TABLE IF NOT EXISTS matches (
     ledger_signed TEXT NOT NULL DEFAULT '0'
 );
 CREATE INDEX IF NOT EXISTS idx_matches_run ON matches(run_id, tier);
+CREATE TABLE IF NOT EXISTS close_versions (
+    close_id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL,
+    period TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    rule_version TEXT NOT NULL,
+    balance_sha256 TEXT NOT NULL DEFAULT '',
+    balance_file TEXT NOT NULL DEFAULT '',
+    balance_bytes INTEGER NOT NULL DEFAULT 0,
+    source_sha_json TEXT NOT NULL DEFAULT '{}',
+    account_count INTEGER NOT NULL DEFAULT 0,
+    unexplained_count INTEGER NOT NULL DEFAULT 0,
+    closing_total TEXT NOT NULL DEFAULT '0.00',
+    unexplained_total TEXT NOT NULL DEFAULT '0.00',
+    status TEXT NOT NULL DEFAULT 'closed',
+    result_json TEXT NOT NULL DEFAULT '{}'
+);
+CREATE TABLE IF NOT EXISTS close_accounts (
+    close_id TEXT NOT NULL,
+    account TEXT NOT NULL,
+    account_name TEXT NOT NULL DEFAULT '',
+    opening_balance TEXT NOT NULL DEFAULT '0.00',
+    flow_signed TEXT NOT NULL DEFAULT '0.00',
+    flow_count INTEGER NOT NULL DEFAULT 0,
+    fee_total TEXT NOT NULL DEFAULT '0.00',
+    bank_closing TEXT NOT NULL DEFAULT '0.00',
+    unexplained TEXT NOT NULL DEFAULT '0.00',
+    PRIMARY KEY (close_id, account)
+);
+CREATE INDEX IF NOT EXISTS idx_close_accounts ON close_accounts(close_id, account);
 """
 
 RUN_COLUMNS = (
@@ -308,5 +338,81 @@ class Store:
                         str(m.get("bank_signed", "0")), str(m.get("ledger_signed", "0")),
                     )
                     for m in matches
+                ],
+            )
+
+    # ---------- 月结关账版本 ----------
+    @staticmethod
+    def _close_row(row: sqlite3.Row) -> dict:
+        data = dict(row)
+        data["source_sha"] = json.loads(data.pop("source_sha_json") or "{}")
+        data["result"] = json.loads(data.pop("result_json") or "{}")
+        return data
+
+    def get_close(self, close_id: str) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM close_versions WHERE close_id = ?", (close_id,)
+            ).fetchone()
+        return self._close_row(row) if row else None
+
+    def list_closes(self, limit: int = 20) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM close_versions ORDER BY rowid DESC LIMIT ?", (limit,)
+            ).fetchall()
+        return [self._close_row(row) for row in rows]
+
+    def latest_close(self) -> dict | None:
+        with self._conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM close_versions ORDER BY rowid DESC LIMIT 1"
+            ).fetchone()
+        return self._close_row(row) if row else None
+
+    def close_accounts(self, close_id: str) -> list[dict]:
+        with self._conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM close_accounts WHERE close_id = ? ORDER BY account", (close_id,)
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def save_close(self, version: dict, accounts: list[dict]) -> None:
+        """整版快照在一个事务里落库：先删后插，失败整体回滚，旧版保持可读。"""
+        source_json = json.dumps(version.get("source_sha", {}), ensure_ascii=False, sort_keys=True)
+        result_json = json.dumps(version.get("result", {}), ensure_ascii=False, sort_keys=True)
+        with self._conn() as conn:
+            conn.execute("DELETE FROM close_accounts WHERE close_id = ?", (version["close_id"],))
+            conn.execute("DELETE FROM close_versions WHERE close_id = ?", (version["close_id"],))
+            conn.execute(
+                """INSERT INTO close_versions (close_id, run_id, period, created_at,
+                    rule_version, balance_sha256, balance_file, balance_bytes, source_sha_json,
+                    account_count, unexplained_count, closing_total, unexplained_total,
+                    status, result_json)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    version["close_id"], version["run_id"], version["period"],
+                    version["created_at"], version["rule_version"],
+                    version.get("balance_sha256", ""), version.get("balance_file", ""),
+                    version.get("balance_bytes", 0), source_json,
+                    version.get("account_count", len(accounts)),
+                    version.get("unexplained_count", 0),
+                    str(version.get("closing_total", "0.00")),
+                    str(version.get("unexplained_total", "0.00")),
+                    version.get("status", "closed"), result_json,
+                ),
+            )
+            conn.executemany(
+                """INSERT INTO close_accounts (close_id, account, account_name,
+                    opening_balance, flow_signed, flow_count, fee_total, bank_closing,
+                    unexplained) VALUES (?,?,?,?,?,?,?,?,?)""",
+                [
+                    (
+                        version["close_id"], a["account"], a.get("account_name", ""),
+                        str(a["opening_balance"]), str(a["flow_signed"]),
+                        int(a.get("flow_count", 0)), str(a["fee_total"]),
+                        str(a["bank_closing"]), str(a["unexplained"]),
+                    )
+                    for a in accounts
                 ],
             )

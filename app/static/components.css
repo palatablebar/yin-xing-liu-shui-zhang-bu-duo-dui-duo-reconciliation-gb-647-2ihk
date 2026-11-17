@@ -79,4 +79,24 @@ select { padding: 0 6px; }
 
 .empty { margin: 12px; color: var(--ink-faint); font-size: 12px; }
 
+.rule-note {
+  margin: 6px 0 10px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border-left: 2px solid var(--accent);
+  border-radius: var(--radius-sm);
+  color: var(--ink-muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+.rule-note b { color: var(--ink); }
+
+.grid tfoot td {
+  border-top: 1px solid var(--line-strong);
+  background: var(--surface-2);
+  font-weight: 600;
+}
+
+.links { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
+
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }

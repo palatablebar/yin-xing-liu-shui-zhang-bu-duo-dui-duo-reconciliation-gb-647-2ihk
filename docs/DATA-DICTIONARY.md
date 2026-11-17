@@ -42,3 +42,11 @@
 
 - `run_id` 由规则版本、两侧文件 sha256、参数共同计算，同一组输入重跑得到同一 `run_id`。
 - 清单包含输入文件名、sha256、字节数、规则版本、参数、计数与耗时。
+
+## 月结关账
+
+- 关账表：`close_versions`（版本头 + `result_json` 整版快照）与 `close_accounts`（逐账户四值与差额），写入在单事务内先删后插。
+- 每账户字段：`opening_balance` 期初、`flow_signed` 流水累计（带符号，只计有效银行行）、`fee_total` 其中手续费、`bank_closing` 银行期末（关账权威值）、`unexplained` 未解释差额；推算期末 = 期初 + 流水累计。
+- 未解释差额 = 银行期末 − 推算期末，量化到分；为 0 表示对平，非 0 原样保留，不产生调整分录。
+- `close_id` 由规则版本、`run_id`、余额表 sha256 计算；同批同表重跑为同一版本，余额表变化才出新版本，旧版本不可变。
+- 余额表原因码 `BALANCE_ACCOUNT_EMPTY`、`BALANCE_ACCOUNT_UNKNOWN`、`BALANCE_DUP_ACCOUNT`、`BALANCE_AMOUNT_EMPTY` 与隔离原因码同表管理（`app/reasons.py`，阶段「关账」）。

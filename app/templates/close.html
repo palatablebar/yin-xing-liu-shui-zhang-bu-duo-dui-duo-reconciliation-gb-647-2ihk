@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}月结关账{% endblock %}
+{% block body %}
+<main class="page">
+  <header class="page-head">
+    <h1>月结关账</h1>
+    <span class="page-meta">{% if close %}{{ close.version.close_id }}{% else %}无版本{% endif %}</span>
+  </header>
+
+  <section class="panel">
+    <h2>关账口径</h2>
+    {% if close and close_history and close.version.close_id != close_history[0].close_id %}
+    <p class="rule-note">正在查看历史版本 <b>{{ close.version.close_id }}</b>，
+      <a href="/close">返回最新版本</a>。该版结果为落库快照，不会被后续重跑改动。</p>
+    {% endif %}
+    <p class="rule-note">
+      关账现金以<b>银行期末余额</b>为准（银行对账单权威值），流水累计不覆盖它；
+      <b>未解释差额 = 银行期末 −（期初 + 流水累计）</b>，即流水缺行（如隔日入账手续费）的金额。
+      差额按账户原样保留并交审计，不生成调整分录抹平。
+    </p>
+    <form id="close-form" class="import-form" enctype="multipart/form-data">
+      <input type="text" name="period" placeholder="会计期间，如 2026-03" aria-label="会计期间">
+      <input type="file" name="file" accept=".csv" aria-label="期末余额文件">
+      <button class="btn" type="submit">生成关账版本</button>
+      <button class="btn" type="button" data-action="close-sample">用样例余额表关账</button>
+    </form>
+  </section>
+
+  {% if close %}
+  {% set v = close.version %}
+  {% set s = close.summary %}
+  <section class="panel">
+    <h2>当前版本 <span class="chip mono">{{ v.close_id }}</span>
+      <span class="chip">期间 {{ v.period or '—' }}</span>
+      <span class="chip">基于批次 {{ v.run_id|shortsha }}</span>
+    </h2>
+    <div class="totalbar">
+      <span class="total"><b>账户</b><em>{{ v.account_count }}</em>个</span>
+      <span class="total"><b>期初合计</b><em>{{ s.opening_total|money }}</em>元</span>
+      <span class="total"><b>流水累计</b><em>{{ s.flow_total|money }}</em>元</span>
+      <span class="total"><b>关账总额(银行期末)</b><em>{{ s.closing_total|money }}</em>元</span>
+      <span class="total total-right"><b>未解释差额</b><em>{{ s.unexplained_total|signed_money }}</em>元</span>
+    </div>
+    <div class="table-wrap">
+      <table class="grid" id="close-table">
+        <thead>
+          <tr>
+            <th>账户</th><th>账户名称</th>
+            <th class="num">期初余额</th>
+            <th class="num">流水累计</th>
+            <th class="num">笔数</th>
+            <th class="num">其中手续费</th>
+            <th class="num">推算期末</th>
+            <th class="num">银行期末(关账值)</th>
+            <th class="num">未解释差额</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for a in close.accounts %}
+          <tr class="{% if a.has_gap %}unmatched{% endif %}">
+            <td class="mono">{{ a.account }}</td>
+            <td>{{ a.account_name }}</td>
+            <td class="num mono">{{ a.opening_balance|money }}</td>
+            <td class="num mono">{{ a.flow_signed|signed_money }}</td>
+            <td class="num mono">{{ a.flow_count }}</td>
+            <td class="num mono">{{ a.fee_total|money }}</td>
+            <td class="num mono">{{ a.expected_closing|money }}</td>
+            <td class="num mono"><b>{{ a.bank_closing|money }}</b></td>
+            <td class="num mono"><b>{{ a.unexplained|signed_money }}</b></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="4"><b>合计</b></td>
+            <td class="num mono"></td>
+            <td class="num mono"></td>
+            <td class="num mono"><b>{{ s.expected_total|money }}</b></td>
+            <td class="num mono"><b>{{ s.closing_total|money }}</b></td>
+            <td class="num mono"><b>{{ s.unexplained_total|signed_money }}</b></td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+    <div class="links">
+      <a class="btn" href="/api/closes/latest/close.csv?version={{ v.close_id }}">关账 CSV</a>
+      <a class="btn" href="/api/closes/latest/close.json?version={{ v.close_id }}">版本快照 JSON</a>
+    </div>
+    {% if close.balance_issues %}
+    <p class="empty">余额表诊断 {{ close.balance_issues|length }} 条（已拒入，未生成版本）。</p>
+    {% endif %}
+  </section>
+  {% else %}
+  <section class="panel">
+    <p class="empty">还没有关账版本。先在工作台「载入样例」完成对账，再上传期末余额表。</p>
+  </section>
+  {% endif %}
+
+  <section class="panel">
+    <h2>版本历史 <span class="page-meta">{{ close_history|length }} 条</span></h2>
+    <div class="table-wrap">
+      <table class="grid compact" id="close-history">
+        <thead>
+          <tr><th>版本号</th><th>期间</th><th>生成时间</th><th>余额表</th>
+              <th class="num">账户</th><th class="num">差额户</th>
+              <th class="num">关账总额</th><th class="num">未解释差额</th></tr>
+        </thead>
+        <tbody>
+        {% for item in close_history %}
+          <tr class="{% if close and item.close_id == close.version.close_id %}pair{% endif %}">
+            <td class="mono"><a href="/close?version={{ item.close_id }}">{{ item.close_id }}</a>
+              {% if close and item.close_id == close.version.close_id %}<span class="chip">查看中</span>{% endif %}</td>
+            <td class="mono">{{ item.period or '—' }}</td>
+            <td class="mono">{{ item.created_at|localdt }}</td>
+            <td class="mono">{{ item.balance_file }}</td>
+            <td class="num mono">{{ item.account_count }}</td>
+            <td class="num mono">{{ item.unexplained_count }}</td>
+            <td class="num mono">{{ item.closing_total|money }}</td>
+            <td class="num mono">{{ item.unexplained_total|signed_money }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% if not close_history %}<p class="empty">还没有关账版本。</p>{% endif %}
+    </div>
+  </section>
+</main>
+{% endblock %}

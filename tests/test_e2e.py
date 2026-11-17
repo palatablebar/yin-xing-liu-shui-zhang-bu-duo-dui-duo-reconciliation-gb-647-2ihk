@@ -5,7 +5,7 @@ from pathlib import Path
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 
 
-PAGES = ("/", "/quarantine", "/candidates", "/matches", "/batches", "/export")
+PAGES = ("/", "/quarantine", "/candidates", "/matches", "/batches", "/export", "/close")
 
 
 def test_full_pipeline_from_samples(client):
@@ -63,3 +63,22 @@ def test_expected_match_groups_fixture(client, demo):
         for group in expected["groups"]
     ]
     assert observed == wanted
+
+
+def test_month_end_close_keeps_unexplained_gap(client, demo):
+    """月结：关账取银行期末，隔日漏入账手续费以未解释差额保留，不做调整。"""
+    response = client.post("/api/closes",
+                           data={"sample": "bank_balance_dirty.csv", "period": "2026-03"})
+    assert response.status_code == 200
+    body = response.json()
+    assert body["version"]["period"] == "2026-03"
+    assert body["summary"]["unexplained_total"] == "-12.00"
+    assert body["summary"]["closing_total"] == "268708.49"
+    # 同批重跑不产生第二份差额
+    again = client.post("/api/closes", data={"sample": "bank_balance_dirty.csv"})
+    assert again.json()["close_id"] == body["close_id"]
+    assert client.get("/api/closes").json()["count"] == 1
+    # 页面与导出同版
+    assert body["close_id"] in client.get("/close").text
+    assert body["summary"]["unexplained_total"] in \
+        client.get("/api/closes/latest/close.csv").text

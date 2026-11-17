@@ -15,6 +15,7 @@ from .modules.m5_matching.subset import TIER_NAMES
 from .modules.m6_diff import differences as differences_mod
 from .modules.m6_diff import history as history_mod
 from .modules.m7_export import service as export_service
+from .modules.m8_close import service as close_service
 
 TEMPLATE_DIR = BASE_DIR / "templates"
 STATIC_DIR = BASE_DIR / "static"
@@ -27,6 +28,7 @@ NAV = (
     ("匹配", "/matches"),
     ("批次", "/batches"),
     ("导出", "/export"),
+    ("月结关账", "/close"),
 )
 
 
@@ -235,3 +237,20 @@ def setup(app: FastAPI) -> None:
         ]
         context.update({"summary": summary, "total_rows": total_rows})
         return render(request, "export.html", context)
+
+    @app.get("/close")
+    def close(request: Request):
+        store = request.app.state.store
+        context = base(request, "月结关账", "/close")
+        requested = request.query_params.get("version", "").strip()
+        if requested:
+            payload = close_service.detail_payload(store, requested)
+        else:
+            payload = close_service.latest_payload(store)
+        history = close_service.history_payload(store, 12)
+        context.update({
+            "close": payload,
+            "close_history": history["versions"],
+            "accounts_registered": request.app.state.settings.accounts,
+        })
+        return render(request, "close.html", context)

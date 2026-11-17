@@ -38,12 +38,19 @@ async function runAction(name) {
     demo: "/api/demo/run",
     candidates: "/api/candidates",
     matches: "/api/matches",
+    "close-sample": "/api/closes",
   };
   const url = urls[name];
   if (!url) return;
   setBusy(true);
   try {
-    await post(url);
+    const options = { method: "POST" };
+    if (name === "close-sample") {
+      const data = new FormData();
+      data.append("sample", "bank_balance_dirty.csv");
+      options.body = data;
+    }
+    await post(url, options.body);
     window.location.reload();
   } catch (error) {
     flash(error.message);
@@ -70,6 +77,25 @@ document.addEventListener("DOMContentLoaded", () => {
       const data = new FormData(form);
       try {
         await post("/api/statements/import", data);
+        window.location.reload();
+      } catch (error) {
+        flash(error.message);
+      }
+    });
+  }
+
+  const closeForm = document.querySelector("#close-form");
+  if (closeForm) {
+    closeForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const fileInput = closeForm.querySelector('input[type="file"]');
+      if (!fileInput || !fileInput.files.length) {
+        flash("请选择期末余额文件");
+        return;
+      }
+      const data = new FormData(closeForm);
+      try {
+        await post("/api/closes", data);
         window.location.reload();
       } catch (error) {
         flash(error.message);
